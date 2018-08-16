@@ -37,13 +37,6 @@ minetest.after(0, function()
     print("Random Block Gen: " .. tostring(#gen.nodes) .. " nodes found")
 end)
 
-minetest.register_on_mapgen_init(function(params) -- Automatically turn on singlenode generator
-    minetest.set_mapgen_params({
-        mgname = "singlenode"
-    })
-end)
-
-
 function gen.get_node()
 	return gen.nodes[math.random(#gen.nodes)]
 end
