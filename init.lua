@@ -4,14 +4,17 @@ local MAX = 20000
 local DEBUG = false
 local HSPACING = 4
 local VSPACING = 5
+local CHEST_CHANCE = 0.9
+local SPAWNS = math.floor(31000/HSPACING/2)
 
 local groups_ignore = {
-    "tnt",
-    "igniter"
+    --"tnt",
+    --"igniter"
 }
 
 gen = {}
 gen.nodes = {}
+gen.items = {}
 
 function gen.ignore(name, props)
     local ignore = false
@@ -35,12 +38,50 @@ minetest.after(0, function()
             table.insert(gen.nodes, name)
         end
     end
-
     print("Random Block Gen: " .. tostring(#gen.nodes) .. " nodes found")
+
+    print("Random Block Gen: Searching for items...")
+    for name, props in pairs(minetest.registered_items) do
+        if not minetest.registered_nodes[name] then
+            table.insert(gen.items, name)
+        end
+    end
+    print("Random Block Gen: " .. tostring(#gen.items) .. " items found")
 end)
 
 function gen.get_node()
 	return gen.nodes[math.random(#gen.nodes)]
+end
+
+function gen.get_item()
+    return gen.items[math.random(#gen.items)]
+end
+
+-- fill chests
+function gen.fill_chest(pos)
+    local meta = minetest.get_meta(pos)
+
+    local chest_formspec =
+     "size[8,9]" ..
+     default.gui_bg ..
+     default.gui_bg_img ..
+     default.gui_slots ..
+     "list[current_name;main;0,0.3;8,4;]" ..
+     "list[current_player;main;0,4.85;8,1;]" ..
+     "list[current_player;main;0,6.08;8,3;8]" ..
+     "listring[current_name;main]" ..
+     "listring[current_player;main]" ..
+     default.get_hotbar_bg(0,4.85)
+    
+    meta:set_string("formspec", chest_formspec)
+    meta:set_string("infotext", "Chest")
+    local inv = meta:get_inventory()
+    inv:set_size("main", 8*4)
+
+    -- fill inventory
+    for i = 1,math.random(32) do
+        inv:add_item("main", gen.get_item() .. " " .. tostring(math.random(99)))
+    end
 end
 
 minetest.register_on_generated(function(minp, maxp, seed)
@@ -61,9 +102,12 @@ minetest.register_on_generated(function(minp, maxp, seed)
 	for x=minp.x,maxp.x do
 		for z=minp.z,maxp.z do
 			for y=minp.y,maxp.y do
-                if x % HSPACING == 0 and y % HSPACING == 0 and z % VSPACING == 0 then
+                if x % HSPACING == 0 and z % HSPACING == 0 and y % VSPACING == 0 then
                     local node = gen.get_node()
                     data[area:index(x, y, z)] = minetest.get_content_id(node)
+                    if math.random() > CHEST_CHANCE then
+                        gen.fill_chest({x=x,y=y,z=z})
+                    end
                 end
 			end
 		end
@@ -85,3 +129,17 @@ minetest.register_on_generated(function(minp, maxp, seed)
         minetest.chat_send_all(geninfo)
     end
 end)
+
+-- If player dies within the "Random Blocks Gen" region, respawn it in the same region
+minetest.register_on_respawnplayer(function(player)
+    local y = player:getpos().y
+    if y < MAX and y > MIN then
+        player:setpos({
+            x = (math.random(SPAWNS)-SPAWNS)*HSPACING,
+            y = MAX - 30,
+            z = (math.random(SPAWNS)-SPAWNS)*HSPACING,
+        })
+        return true
+    end
+end)
+
