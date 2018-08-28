@@ -2,6 +2,8 @@
 local MIN = 10000
 local MAX = 20000
 local DEBUG = false
+local HSPACING = 4
+local VSPACING = 5
 
 local groups_ignore = {
     "tnt",
@@ -59,8 +61,10 @@ minetest.register_on_generated(function(minp, maxp, seed)
 	for x=minp.x,maxp.x do
 		for z=minp.z,maxp.z do
 			for y=minp.y,maxp.y do
-				local node = gen.get_node()
-				data[area:index(x, y, z)] = minetest.get_content_id(node)
+                if x % HSPACING == 0 and y % HSPACING == 0 and z % VSPACING == 0 then
+                    local node = gen.get_node()
+                    data[area:index(x, y, z)] = minetest.get_content_id(node)
+                end
 			end
 		end
 	end
