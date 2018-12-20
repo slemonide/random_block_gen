@@ -26,12 +26,12 @@ function random_block_gen.add_item(name, typ)
 	local content_id = minetest.get_content_id(name)
 	if (typ or def.type) == 'node' then
 		table.insert(random_block_gen.nodes, content_id)
+		if def.on_construct then
+			on_construct_names[content_id] = name
+			on_construct_functions[content_id] = def.on_construct
+		end
 	else
-		table.insert(random_block_gen.items, content_id)
-	end
-	if def.on_construct then
-		on_construct_names[content_id] = name
-		on_construct_functions[content_id] = def.on_construct
+		table.insert(random_block_gen.items, name)
 	end
 end
 
