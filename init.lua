@@ -1,101 +1,140 @@
--- min and max height for blocks to be generated
-local MIN = 10000
-local MAX = 20000
-local DEBUG = false
-local HSPACING = 4
-local VSPACING = 5
-local SPAWNS = math.floor(31000/HSPACING/2)
+random_block_gen = {}
 
-local groups_ignore = {
-    --"tnt",
-    --"igniter"
-	"not_in_creative_inventory",
-	"bed"
+-- min and max height for blocks to be generated
+random_block_gen.MIN_Y = 10000
+random_block_gen.MAX_Y = 20000
+
+random_block_gen.HSPACING = 4
+random_block_gen.VSPACING = 5
+
+random_block_gen.GROUPS_IGNORE = {
+	--"tnt",
+	--"igniter"
+	--"bed"
 }
 
-gen = {}
-gen.nodes = {}
-gen.items = {}
+random_block_gen.nodes = {}
+random_block_gen.items = {}
 
-function gen.ignore(name, props)
-    local ignore = false
-    for _, ignored_group in ipairs(groups_ignore) do
-        if props.groups[ignored_group] then
---          print("ignoring " .. tostring(name))
-            return true
-        end
-    end
+local on_construct_names = {}
+local on_construct_functions = {}
+
+-- Add node or item to database.
+-- Parameter "typ" is optional for autodetection
+function random_block_gen.add_item(name, typ)
+	local def = minetest.registered_items[name]
+	local content_id = minetest.get_content_id(name)
+	if (typ or def.type) == 'node' then
+		table.insert(random_block_gen.nodes, content_id)
+		if def.on_construct then
+			on_construct_names[content_id] = name
+			on_construct_functions[content_id] = def.on_construct
+		end
+	else
+		table.insert(random_block_gen.items, name)
+	end
 end
+
+-- Check ignored group
+function random_block_gen.ignore(name, props)
+	for _, ignored_group in ipairs(random_block_gen.GROUPS_IGNORE) do
+		if props.groups[ignored_group] then
+			return true
+		end
+	end
+	return false
+end
+
 
 minetest.after(0, function()
-    print("Random Block Gen: Searching for nodes...")
-    for name, props in pairs(minetest.registered_nodes) do
-        if not gen.ignore(name, props) then
-            table.insert(gen.nodes, name)
-        end
-    end
-    print("Random Block Gen: " .. tostring(#gen.nodes) .. " nodes found")
-
-    print("Random Block Gen: Searching for items...")
-    for name, props in pairs(minetest.registered_items) do
-        if not minetest.registered_nodes[name] then
-            table.insert(gen.items, name)
-        end
-    end
-    print("Random Block Gen: " .. tostring(#gen.items) .. " items found")
+	minetest.log("Random Block Gen: Searching for items and nodes...")
+	for name, def in pairs(minetest.registered_items) do
+		-- collect creative available stuff only
+		if def.description and def.description ~= "" and
+				not random_block_gen.ignore(name, def) and
+				not def.groups.not_in_creative_inventory then
+			random_block_gen.add_item(name)
+		else
+			minetest.log("verbose", "Random Block Gen: Skip"..name)
+		end
+	end
+	minetest.log("Random Block Gen: " .. tostring(#random_block_gen.nodes) .. " nodes found")
+	minetest.log("Random Block Gen: " .. tostring(#random_block_gen.items) .. " items found")
 end)
 
-function gen.get_node()
-	return gen.nodes[math.random(#gen.nodes)]
+function random_block_gen.get_node()
+	return random_block_gen.nodes[math.random(#random_block_gen.nodes)]
 end
 
-function gen.get_item()
-    return gen.items[math.random(#gen.items)]
+function random_block_gen.get_item()
+	return random_block_gen.items[math.random(#random_block_gen.items)]
 end
 
 -- fill chests
-function gen.fill_chest(pos)
-    local meta = minetest.get_meta(pos)
-    local inv = meta:get_inventory()
-    -- fill inventory
-    for i = 1,math.random(32) do
-        inv:add_item("main", gen.get_item() .. " " .. tostring(math.random(99)))
+function random_block_gen.fill_chest(pos)
+	local meta = minetest.get_meta(pos)
+	local inv = meta:get_inventory()
+	-- fill inventory
+	for i = 1, math.random(inv:get_size("main")) do
+		local stack = ItemStack(random_block_gen.get_item())
+		stack:set_count(math.random(stack:get_stack_max()))
+		inv:add_item("main", stack)
     end
 end
 
-minetest.register_on_generated(function(minp, maxp, seed)
-    if maxp.y > MAX or minp.y < MIN then
-        return
-    end
+local function do_on_construct(on_construct_tab)
+	-- Check if chunk really processed
+	local chk_pos = next(on_construct_tab)
+	local chk_node = minetest.get_node(chk_pos)
+	if chk_node.name == 'ignore' then
+		minetest.after(0.1, do_on_construct, on_construct_tab)
+		return -- try again in 0.1 seconds
+	end
 
-	local t1 = os.clock()
-	local geninfo = "[mg] generates..."
-    if DEBUG then
-        minetest.chat_send_all(geninfo)
-    end
+	-- Chunk is there, do it
+	for pos, i in pairs(on_construct_tab) do
+		on_construct_functions[i](pos)
+		if on_construct_names[i] == 'default:chest' then
+			minetest.after(0.1, random_block_gen.fill_chest, pos)
+		end
+	end
+end
+
+
+minetest.register_on_generated(function(minp, maxp, seed)
+	-- Check right high
+	if random_block_gen.MIN_Y > maxp.y or random_block_gen.MIN_Y < minp.y then
+		return
+	end
+	local min_y, max_y
+	if random_block_gen.MIN_Y > minp.y then
+		min_y = random_block_gen.MIN_Y
+	else
+		min_y = minp.y
+	end
+	if random_block_gen.MAX_Y < maxp.y then
+		max_y = random_block_gen.MAX_Y
+	else
+		max_y = maxp.y
+	end
 
 	local vm, emin, emax = minetest.get_mapgen_object("voxelmanip")
 	local data = vm:get_data()
 	local area = VoxelArea:new{MinEdge=emin, MaxEdge=emax}
 	local on_construct_tab = {}
 
-	for x=minp.x,maxp.x do
-		for z=minp.z,maxp.z do
-			for y=minp.y,maxp.y do
-                if x % HSPACING == 0 and z % HSPACING == 0 and y % VSPACING == 0 then
-                    local node = gen.get_node()
-                    local pos = {x=x,y=y,z=z}
-                    data[area:index(x, y, z)] = minetest.get_content_id(node)
-                    if minetest.registered_nodes[node].on_construct then
-                        on_construct_tab[pos] = node
-                    end
-                end
+	for x=minp.x, maxp.x, random_block_gen.HSPACING do
+		for z=minp.z, maxp.z, random_block_gen.HSPACING do
+			for y=min_y, max_y, random_block_gen.VSPACING do
+				local pos = {x=x,y=y,z=z}
+				local content_id = random_block_gen.get_node()
+				 data[area:index(x, y, z)] = content_id
+				if on_construct_functions[content_id] then
+					on_construct_tab[pos] = content_id
+				end
 			end
 		end
 	end
-
-	local t2 = os.clock()
-	local calcdelay = string.format("%.2fs", t2 - t1)
 
 	vm:set_data(data)
 	vm:set_lighting({day=0, night=0})
@@ -105,34 +144,6 @@ minetest.register_on_generated(function(minp, maxp, seed)
 
 	-- fix the nodes
 	if next(on_construct_tab) then
-		minetest.after(0.2, function(on_construct_tab)
-			for pos, node in pairs(on_construct_tab) do
-				minetest.registered_nodes[node].on_construct(pos)
-				if node == 'default:chest' then
-					minetest.after(0, gen.fill_chest, pos)
-				end
-			end
-		end, on_construct_tab)
+		minetest.after(0.1, do_on_construct, on_construct_tab)
 	end
-
-	local t3 = os.clock()
-	local geninfo = "[mg] done after ca.: "..calcdelay.." + "..string.format("%.2fs", t3 - t2).." = "..string.format("%.2fs", t3 - t1)
-    if DEBUG then
-        print(geninfo)
-        minetest.chat_send_all(geninfo)
-    end
 end)
-
--- If player dies within the "Random Blocks Gen" region, respawn it in the same region
-minetest.register_on_respawnplayer(function(player)
-    local y = player:getpos().y
-    if y < MAX and y > MIN then
-        player:setpos({
-            x = (math.random(SPAWNS)-SPAWNS)*HSPACING,
-            y = MAX - 30,
-            z = (math.random(SPAWNS)-SPAWNS)*HSPACING,
-        })
-        return true
-    end
-end)
-
